@@ -4,10 +4,10 @@ const bodyParser = require('body-parser');
 // module to support JSON files parsing and formate confirmation. Used in the POST  request.
 const Joi = require('joi');
 const axios = require('axios');
-const PEDESTRIAN_SERVICE_ADDR = "http://localhost:3002/"
-const VEHICLE_SERVICE_ADDR = "http://localhost:3003/"
-const CROSSWALK_SERVICE_ADDR = "http://localhost:3004/"
-const PROXIMITY_SERVICE_ADDR = "http://localhost:3005/"
+const PEDESTRIAN_SERVICE_ADDR = "http://pedestrian_service:3002/"
+const VEHICLE_SERVICE_ADDR = "http://vehicle_service:3003/"
+const CROSSWALK_SERVICE_ADDR = "http://crosswalk_service:3004/"
+const PROXIMITY_SERVICE_ADDR = "http://proximity_service:3005/"
 
 process.title = "API Layer"
 
@@ -16,7 +16,7 @@ const app = express();
 var allowCrossDomain = function(req, res, next) {
     res.header('Access-Control-Allow-Origin', "*");
     res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Headers', '*');
     next();
 }
 
@@ -33,7 +33,7 @@ app.use(bodyParser.json())
 
 // Pedestrian Service Proxy
 app.get('/pedestrians', (req, res) => {
-    console.log("[API LAYER] GET pedestrians ");
+    console.log("[Api LAYER] GET pedestrians ");
     axios.get(PEDESTRIAN_SERVICE_ADDR + "pedestrians/")
     .then(response => {
         res.status(response.status).send(response.data);
@@ -97,23 +97,23 @@ app.put('/pedestrian/', (req, res) => {
     }
     axios.put(PEDESTRIAN_SERVICE_ADDR + "pedestrian/", req.body)
     .then(response => {
-        checkIfNearby(req.body.latitude, req.body.longitude).then(([crosswalk_ids, promise]) => {
+        checkIfNearby(req.body.latitude, req.body.longitude).then(([crosswalks_info, promise]) => {
             promise.then(responses => {
                 var crosswalks_nearby = []
                 responses.forEach((response, i) => {
                     if(response.nearby === true)
                     {
-                        crosswalks_nearby.push(crosswalk_ids[i])
-                        console.log("Crosswalk: " + crosswalk_ids[i] + " is nearby pedestrian!");
-                        updateCrosswalkNearbyPedestrian(crosswalk_ids[i], req.body.id);
+                        crosswalks_nearby.push(crosswalks_info[i])
+                        console.log("Crosswalk: " + crosswalks_info[i].id + " is nearby pedestrian!");
+                        updateCrosswalkNearbyPedestrian(crosswalks_info[i].id, req.body.id);
                     }
                     else 
                     {
-                        console.log("Crosswalk: " + crosswalks[i].id + " is NOT nearby pedestrian!");
-                        deleteCrosswalkNearbyPedestrian(crosswalks[i].id, req.body.id);
+                        console.log("Crosswalk: " + crosswalks_info[i].id + " is NOT nearby pedestrian!");
+                        deleteCrosswalkNearbyPedestrian(crosswalks_info[i].id, req.body.id);
                     }
                 })
-                var nearby_vehicles_promises = crosswalks_nearby.map(id => getNearbyVehicles(id));
+                var nearby_vehicles_promises = crosswalks_nearby.map(({id}) => getNearbyVehicles(id));
                 var nearby_vehicles = {}
                 Promise.all(nearby_vehicles_promises)
                 .then(responses => {
@@ -121,14 +121,16 @@ app.put('/pedestrian/', (req, res) => {
                         response_data = response.data
                         if(Array.isArray(response_data.vehicles) && response_data.vehicles.length > 0)
                         {
-                            nearby_vehicles[response_data.crosswalk] = response_data.vehicles;
+                            response_data.vehicles = response_data.vehicles.map(o => o.vehicle_id);
+                            response_data.vehicles = [...new Set(response_data.vehicles)];
+                            nearby_vehicles[response_data.crosswalk] = {state: crosswalks_nearby[i].state, vehicles: response_data.vehicles};
                             console.log("Crosswalk: " + response_data.crosswalk + " has nearby vehicles!");
                         }
                         else 
                         {
                             if(!(response_data.crosswalk in nearby_vehicles))
                             {
-                                nearby_vehicles[response_data.crosswalk] = []
+                                nearby_vehicles[response_data.crosswalk] = {state: crosswalks_nearby[i].state, vehicles: []}
                             }
                             console.log("Crosswalk: " + response_data.crosswalk + " does not have nearby vehicles!");
                         }
@@ -215,23 +217,25 @@ app.put('/vehicle/', (req, res) => {
     }
     axios.put(VEHICLE_SERVICE_ADDR + "vehicle/", req.body)
     .then(response => {
-        checkIfNearby(req.body.latitude, req.body.longitude).then(([crosswalk_ids, promise]) => {
+        checkIfNearby(req.body.latitude, req.body.longitude).then(([crosswalks_info, promise]) => {
             promise.then(responses => {
+                console.log("Crosswalk info:")
+                console.log(crosswalks_info)
                 var crosswalks_nearby = []
                 responses.forEach((response, i) => {
                     if(response.nearby === true)
                     {
-                        crosswalks_nearby.push(crosswalk_ids[i])
-                        console.log("Crosswalk: " + crosswalk_ids[i] + " is nearby vehicle!");
-                        updateCrosswalkNearbyVehicle(crosswalk_ids[i], req.body.id);
+                        crosswalks_nearby.push(crosswalks_info[i])
+                        console.log("Crosswalk: " + crosswalks_info[i].id + " is nearby vehicle!");
+                        updateCrosswalkNearbyVehicle(crosswalks_info[i].id, req.body.id);
                     }
                     else 
                     {
-                        console.log("Crosswalk: " + crosswalks[i].id + " is NOT nearby vehicle!");
-                        deleteCrosswalkNearbyVehicle(crosswalks[i].id, req.body.id);
+                        console.log("Crosswalk: " + crosswalks_info[i].id + " is NOT nearby vehicle!");
+                        deleteCrosswalkNearbyVehicle(crosswalks_info[i].id, req.body.id);
                     }
                 })
-                var nearby_pedestrians_promises = crosswalks_nearby.map(id => getNearbyPedestrians(id));
+                var nearby_pedestrians_promises = crosswalks_nearby.map(({id}) => getNearbyPedestrians(id));
                 var nearby_pedestrians = {}
                 Promise.all(nearby_pedestrians_promises)
                 .then(responses => {
@@ -241,14 +245,16 @@ app.put('/vehicle/', (req, res) => {
                         console.dir(response_data)
                         if(response_data.pedestrians !== undefined && Object.keys(response_data.pedestrians).length > 0)
                         {
-                            nearby_pedestrians[response_data.crosswalk] = response_data.pedestrians;
+                            response_data.pedestrians = response_data.pedestrians.map(o => o.pedestrian_id);
+                            response_data.pedestrians = [...new Set(response_data.pedestrians)];
+                            nearby_pedestrians[response_data.crosswalk] = {state:crosswalks_nearby[i].state, "pedestrians": response_data.pedestrians};
                             console.log("Crosswalk: " + response_data.crosswalk + " has nearby pedestrians!");
                         }
                         else 
                         {
                             if(!(response_data.crosswalk in nearby_pedestrians))
                             {
-                                nearby_pedestrians[response_data.crosswalk] = []
+                                nearby_pedestrians[response_data.crosswalk] = {state: crosswalks_nearby[i].state, "pedestrians": []}
                             }
                             console.log("Crosswalk: " + response_data.crosswalk + " does not have nearby pedestrians!");
                         }
@@ -295,11 +301,37 @@ app.get('/crosswalk/:id', (req, res) => {
     })
 })
 
+app.get('/crosswalk/:id/nearby_pedestrians', (req, res) => {
+    console.log("[API LAYER] GET crosswalk nearby pedestrians: " + req.params.id);
+    axios.get(CROSSWALK_SERVICE_ADDR + "crosswalk/" + req.params.id + "/nearby_pedestrians")
+    .then(response => {
+        res.status(response.status).send({"success": true, ...response.data});
+    })
+    .catch(err => {
+        console.log("Error accessing Crosswalk Service for crosswalks/nearby_pedestrians GET")
+        console.log(err.message)
+        res.status(400).send({"success": false, "error": err.message})
+    })
+})
+
+app.get('/crosswalk/:id/nearby_vehicles', (req, res) => {
+    console.log("[API LAYER] GET crosswalk nearby vehicles: " + req.params.id);
+    axios.get(CROSSWALK_SERVICE_ADDR + "crosswalk/" + req.params.id + "/nearby_vehicles")
+    .then(response => {
+        res.status(response.status).send({"success": true, ...response.data});
+    })
+    .catch(err => {
+        console.log("Error accessing Crosswalk Service for crosswalks/nearby_vehicles GET")
+        console.log(err.message)
+        res.status(400).send({"success": false, "error": err.message})
+    })
+})
+
 checkIfNearby = (pedestrian_lat, pedestrian_lon) => {
     return axios.get(CROSSWALK_SERVICE_ADDR + "crosswalks/")
     .then(response => {
         crosswalks = response.data;
-        crosswalk_ids = crosswalks.map(crosswalk => crosswalk.id)
+        crosswalks_array = crosswalks.map(crosswalk => { return {"id": crosswalk.id, "state": crosswalk.state}})
         crosswalks_promises = crosswalks.map((crosswalk) => {
             data = {
                 lat1: pedestrian_lat,
@@ -311,7 +343,7 @@ checkIfNearby = (pedestrian_lat, pedestrian_lon) => {
                 data: data 
             })
         })
-        return [crosswalk_ids , Promise.all(crosswalks_promises).then(responses => responses.map(response => response.data))]
+        return [crosswalks_array , Promise.all(crosswalks_promises).then(responses => responses.map(response => response.data))]
     })
 
     /*
@@ -367,6 +399,21 @@ app.post('/crosswalk', (req,res) => {
     })
 })
 
+app.put('/crosswalk/:id', (req, res) => {
+    console.log("[API LAYER] PUT crosswalk: " + req.params.id);
+    console.log(req.body);
+    const body = req.body;
+    const result = validateCrosswalkUpdateInput(body);
+    axios.put(CROSSWALK_SERVICE_ADDR + "crosswalk/" + req.params.id, body)
+    .then(response => {
+        res.status(response.status).send({"success": true, ...response.data});
+    })
+    .catch(err => {
+        console.log("Error accessing Crosswalk Service for crosswalks PUT")
+        console.log(err.message)
+        res.status(400).send({"success": false, "error": err.message})
+    })
+})
 // Setting PORT to listen to incoming requests or by default use port 3000
 // Take not that the string in the argument of log is a "back tick" to embedded variable.
 
@@ -427,8 +474,6 @@ function validateCrosswalkUpdateInput(input) {
     const schema = {
         id: Joi.number().min(1).max(8).required(),
         state: Joi.string().min(2).max(3).required(),
-        latitude: Joi.number().precision(8).required(),
-        longitude: Joi.number().precision(8).required(),
     };
     return Joi.validate(input, schema);
 }
